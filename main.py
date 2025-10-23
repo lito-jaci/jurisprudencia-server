@@ -6,10 +6,10 @@ from datetime import date
 
 app = FastAPI(title="Jurisprudência Oficial – Servidor", version="1.0.0")
 
-# CORS: libera chamadas do ChatGPT/Actions
+# CORS para o conector do GPT
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # se quiser, depois restrinja para domínios específicos
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -17,7 +17,7 @@ app.add_middleware(
 
 class SearchRequest(BaseModel):
     query: str
-    tribunal: str = "TODOS"  # STF, STJ, TJPE, TJSP, TJMG, CJF, TODOS
+    tribunal: str = "TODOS"   # STF, STJ, TJPE, TJSP, TJMG, CJF, TODOS
     limite: int = 5
     strict: bool = True
     data_inicio: Optional[date] = None
@@ -39,8 +39,13 @@ class Decision(BaseModel):
 async def root():
     return {"service": "jurisprudencia", "ok": True}
 
+# Saúde — dois caminhos válidos
 @app.get("/health")
 async def health():
+    return {"status": "ok"}
+
+@app.get("/getHealth")
+async def get_health_alias():
     return {"status": "ok"}
 
 def exemplos_reais(query: str, tribunal: str, limite: int) -> List[Decision]:
@@ -94,14 +99,17 @@ def exemplos_reais(query: str, tribunal: str, limite: int) -> List[Decision]:
         exemplos = [d for d in exemplos if d.tribunal.upper() == tribunal.upper()]
     return exemplos[:max(1, min(limite, 20))]
 
+# Pesquisa — rota oficial e alias compatível
 @app.post("/pesquisar", response_model=List[Decision])
 async def pesquisar(payload: SearchRequest = Body(...)):
     resultados = exemplos_reais(payload.query, payload.tribunal, payload.limite)
     if payload.strict:
-        filtrados = []
-        for d in resultados:
-            # pydantic HttpUrl tem atributo .host; garante *.jus.br, data e tribunal presentes
-            if (d.url_oficial.host.endswith(".jus.br") and d.data is not None and d.tribunal):
-                filtrados.append(d)
-        resultados = filtrados
+        resultados = [
+            d for d in resultados
+            if d.url_oficial.host.endswith(".jus.br") and d.data is not None and d.tribunal
+        ]
     return resultados
+
+@app.post("/postPesquisar", response_model=List[Decision])
+async def post_pesquisar_alias(payload: SearchRequest = Body(...)):
+    return await pesquisar(payload)  # reaproveita a lógica
